@@ -20,7 +20,7 @@ jobs:
       - name: Build tdlib and reina in Alpine
         run: |
           mkdir -p td-install out
-          docker run --rm -v "$PWD:/w" -w /w golang:1.24-alpine sh -ec '
+          docker run --rm -v "$PWD:/w" -w /w golang:1.27-alpine sh -ec '
             apk add --no-cache build-base cmake git gperf openssl-dev zlib-dev linux-headers
             if [ ! -f td-install/lib/libtdjson.so ]; then
               git clone --depth 1 https://github.com/tdlib/td.git /td
