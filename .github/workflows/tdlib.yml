@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unpack project zip
         run: for z in ./*.zip; do unzip -q -o "$z"; done
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: td-install
           key: tdlib-alpine-v1
@@ -29,9 +29,15 @@ jobs:
               cmake --build . --target install -j"$(nproc)"
             fi
             cd /w/kuni-go
-            CGO_ENABLED=1 CGO_LDFLAGS="-L/w/td-install/lib" go build -tags tdlib -trimpath -ldflags "-s -w" -o /w/out/reina-tdlib .
+            CGO_ENABLED=1 CGO_LDFLAGS="-L/w/td-install/lib" go build -buildvcs=false -tags tdlib -trimpath -ldflags "-s -w" -o /w/out/reina-tdlib .
             cp /w/td-install/lib/libtdjson.so /w/out/
           '
+      # save the (slow to build) tdlib even if the Go build below failed
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('td-install/lib/libtdjson.so') != ''
+        with:
+          path: td-install
+          key: tdlib-alpine-v1
       - uses: actions/upload-artifact@v4
         with:
           name: reina-alpine-tdlib
