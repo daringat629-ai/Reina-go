@@ -1,0 +1,38 @@
+name: Build tdlib (Alpine)
+
+# Собирает бинарник с tdlib (режим user) под Alpine/musl вместе с libtdjson.so.
+# Запуск вручную: Actions -> Build tdlib (Alpine) -> Run workflow. Первая сборка 20-40 минут, дальше быстрее (кэш).
+on:
+  workflow_dispatch:
+
+jobs:
+  tdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack project zip
+        run: for z in ./*.zip; do unzip -q -o "$z"; done
+      - uses: actions/cache@v4
+        with:
+          path: td-install
+          key: tdlib-alpine-v1
+      - name: Build tdlib and reina in Alpine
+        run: |
+          mkdir -p td-install out
+          docker run --rm -v "$PWD:/w" -w /w golang:1.24-alpine sh -ec '
+            apk add --no-cache build-base cmake git gperf openssl-dev zlib-dev linux-headers
+            if [ ! -f td-install/lib/libtdjson.so ]; then
+              git clone --depth 1 https://github.com/tdlib/td.git /td
+              mkdir /td/build && cd /td/build
+              cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=/w/td-install ..
+              cmake --build . --target install -j"$(nproc)"
+            fi
+            cd /w/kuni-go
+            CGO_ENABLED=1 CGO_LDFLAGS="-L/w/td-install/lib" go build -tags tdlib -trimpath -ldflags "-s -w" -o /w/out/reina-tdlib .
+            cp /w/td-install/lib/libtdjson.so /w/out/
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reina-alpine-tdlib
+          path: out/*
