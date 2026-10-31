@@ -1,9 +1,17 @@
 name: Build tdlib (Alpine)
 
 # Собирает бинарник с tdlib (режим user) под Alpine/musl вместе с libtdjson.so.
-# Запуск вручную: Actions -> Build tdlib (Alpine) -> Run workflow. Первая сборка 20-40 минут, дальше быстрее (кэш).
+# Запускается сам, когда в main меняется архив проекта (*.zip), или вручную: Actions -> Build tdlib (Alpine) -> Run workflow.
+# Первая сборка 20-40 минут, дальше быстрее (кэш). Готовая сборка публикуется в Releases: сервер с update.github_repo
+# находит её сам (update.auto = true ставит сразу, иначе /update в админ-боте).
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['*.zip']
+
+permissions:
+  contents: write
 
 jobs:
   tdlib:
@@ -42,3 +50,12 @@ jobs:
         with:
           name: reina-alpine-tdlib
           path: out/*
+      - name: Publish the build as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out && zip -q ../reina-alpine-tdlib.zip reina-tdlib libtdjson.so && cd ..
+          src=$(ls *.zip | grep -v reina-alpine-tdlib | head -1)
+          gh release create "build-${{ github.run_number }}" reina-alpine-tdlib.zip \
+            --title "Сборка ${{ github.run_number }} (${src%.zip})" \
+            --notes "Собрано из ${src} (${{ github.sha }})." --latest
