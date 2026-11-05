@@ -1,17 +1,19 @@
 name: Build tdlib (Alpine)
 
 # Собирает бинарник с tdlib (режим user) под Alpine/musl вместе с libtdjson.so.
-# Запускается сам, когда в main меняется архив проекта (*.zip), или вручную: Actions -> Build tdlib (Alpine) -> Run workflow.
-# Первая сборка 20-40 минут, дальше быстрее (кэш). Готовая сборка публикуется в Releases: сервер с update.github_repo
-# находит её сам (update.auto = true ставит сразу, иначе /update в админ-боте).
+# Запуск вручную: Actions -> Build tdlib (Alpine) -> Run workflow. Первая сборка 20-40 минут, дальше быстрее (кэш).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['*.zip']
+    inputs:
+      tdlib_ref:
+        description: "tdlib commit or tag to build (default: the one reina-core was checked against)"
+        required: false
+        default: ""
 
-permissions:
-  contents: write
+env:
+  # tdlib master changes its JSON schema often. This commit (TDLib 1.8.69) is the one the request shapes were
+  # validated against (internal/telegram/testdata); reina-core also speaks the 1.8.61-1.8.63 shapes.
+  TDLIB_REF: ${{ inputs.tdlib_ref || '9d92b49bc5d0d2e29fe518239af647a88f8680e6' }}
 
 jobs:
   tdlib:
@@ -24,38 +26,32 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: td-install
-          key: tdlib-alpine-v1
+          key: tdlib-alpine-${{ env.TDLIB_REF }}
       - name: Build tdlib and reina in Alpine
         run: |
           mkdir -p td-install out
-          docker run --rm -v "$PWD:/w" -w /w golang:1.27-alpine sh -ec '
+          docker run --rm -e TDLIB_REF -v "$PWD:/w" -w /w golang:1.24-alpine sh -ec '
             apk add --no-cache build-base cmake git gperf openssl-dev zlib-dev linux-headers
             if [ ! -f td-install/lib/libtdjson.so ]; then
-              git clone --depth 1 https://github.com/tdlib/td.git /td
+              git init -q /td && cd /td
+              git fetch -q --depth 1 https://github.com/tdlib/td.git "$TDLIB_REF" && git checkout -q FETCH_HEAD
               mkdir /td/build && cd /td/build
               cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=/w/td-install ..
               cmake --build . --target install -j"$(nproc)"
             fi
-            cd /w/kuni-go
+            SRC=/w/reina-core; [ -f "$SRC/go.mod" ] || SRC=$(dirname "$(find /w -maxdepth 3 -name go.mod -not -path "*/td*" | head -1)")
+            cd "$SRC"
             CGO_ENABLED=1 CGO_LDFLAGS="-L/w/td-install/lib" go build -buildvcs=false -tags tdlib -trimpath -ldflags "-s -w" -o /w/out/reina-tdlib .
             cp /w/td-install/lib/libtdjson.so /w/out/
+            cp "$SRC/deploy/reina" /w/out/reina && cp "$SRC/deploy/app-add.sh" /w/out/app-add.sh && chmod +x /w/out/reina
           '
       # save the (slow to build) tdlib even if the Go build below failed
       - uses: actions/cache/save@v4
         if: always() && hashFiles('td-install/lib/libtdjson.so') != ''
         with:
           path: td-install
-          key: tdlib-alpine-v1
+          key: tdlib-alpine-${{ env.TDLIB_REF }}
       - uses: actions/upload-artifact@v4
         with:
           name: reina-alpine-tdlib
           path: out/*
-      - name: Publish the build as a release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cd out && zip -q ../reina-alpine-tdlib.zip reina-tdlib libtdjson.so && cd ..
-          src=$(ls *.zip | grep -v reina-alpine-tdlib | head -1)
-          gh release create "build-${{ github.run_number }}" reina-alpine-tdlib.zip \
-            --title "Сборка ${{ github.run_number }} (${src%.zip})" \
-            --notes "Собрано из ${src} (${{ github.sha }})." --latest
